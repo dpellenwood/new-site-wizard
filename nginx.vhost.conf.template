@@ -1,0 +1,101 @@
+server {
+    # Determines the port number that nginx will listen to for this
+    # server configuration. 80 is the default http port.
+    listen       80;
+    
+    # Listen for HTTPS requests as well
+    listen       443 ssl;
+    
+    server_name @@HOSTNAME@@;
+    root "@@PATH@@";
+    
+    # Specify a charset
+    charset utf-8;
+
+    #gzip on;
+
+    access_log @@LOG_PATH@@/access.log;
+    error_log @@LOG_PATH@@/error.log;
+    
+    if ($http_user_agent ~* (Baiduspider|webalta|nikto|wkito|pikto|scan|acunetix|morfeus|webcollage|youdao) ) {
+       return 401;
+    }
+    
+    if ($http_user_agent ~* (HTTrack|clshttp|archiver|loader|email|harvest|extract|grab|miner) ) {
+       return 401;
+    }
+    
+    # Directives to send expires headers and turn off 404 error logging.
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico)$ {
+        expires 24h;
+        log_not_found off;
+        access_log off;
+    }
+
+    # Add trailing slash to */wp-admin requests.
+    rewrite /wp-admin$ $scheme://$host$uri/ permanent;
+    
+    # this prevents hidden files (beginning with a period) from being served
+    location ~ /\. {
+        access_log off;
+        log_not_found off;
+        deny all;
+    }
+    
+    # Pass uploaded files to wp-includes/ms-files.php.
+    rewrite /files/$ /index.php last;
+    
+    if ($uri !~ wp-content/plugins) {
+        rewrite /files/(.+)$ /wp-includes/ms-files.php?file=$1 last;
+    }
+    
+    # Rewrite multisite in a subdirectory '.../wp-.*' and '.../*.php'.
+    if (!-e $request_filename) {
+        rewrite ^/[_0-9a-zA-Z-]+(/wp-.*) $1 last;
+        rewrite ^/[_0-9a-zA-Z-]+.*(/wp-admin/.*\.php)$ $1 last;
+        rewrite ^/[_0-9a-zA-Z-]+(/.*\.php)$ $1 last;
+    }
+    
+    location / {
+            index index.php;
+            try_files $uri $uri/ /index.php$uri?$args;
+    }
+        
+    location ~ \.php$ {
+        # Try the files specified in order. In our case, try the requested URI and if
+        # that fails, try (successfully) to pass a 404 error.
+        try_files      $uri =404;
+    
+        # Include the fastcgi_params defaults provided by nginx
+        include        /etc/nginx/fastcgi_params;
+    
+        # The amount of time for upstream to wait for a fastcgi process to send data.
+        # We keep this *extremely* high so that one can be lazy when remote debugging.
+        fastcgi_read_timeout 3600s;
+    
+        # Buffer size for reading the header of the backend FastCGI process.
+        # This defaults to the value of a single fastcgi_buffers, so does not
+        # need to be specified in our case, but it's good to be explicit.
+        fastcgi_buffer_size 128k;
+    
+        # The number and size of the buffers into which the reply from the FastCGI
+        # process in the backend is read.
+        #
+        # 4 buffers at 128k means that any reply by FastCGI greater than 512k goes
+        # to disk and replies under 512k are handled directly in memory.
+        fastcgi_buffers 32 128k;
+    
+        # SCRIPT_FILENAME is a required parameter for things to work properly,
+        # but was missing in the default fastcgi_params on upgrade to nginx 1.4.
+        # We define it here to be sure that it exists.
+        fastcgi_param   SCRIPT_FILENAME         $document_root$fastcgi_script_name;
+        
+        # Use user-specific FPM pools for each user/site    
+        fastcgi_pass   unix:@@SOCKET@@;
+        
+        # And get to serving the file!
+        fastcgi_index  index.php;
+    }
+    
+}
+
